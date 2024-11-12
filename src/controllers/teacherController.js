@@ -106,10 +106,34 @@ export const teacherController = {
   },
 
   // Actualizar un profesor
+  // En el método update del controlador
   update: async (req, res) => {
     try {
       const { id } = req.params;
       const { firstName, lastName, email, phone, contractType, totalHours, subjects } = req.body;
+
+      // Validar campos requeridos
+      if (!firstName || !lastName || !email) {
+        return res.status(400).json({
+          error: 'Nombre, apellido y email son obligatorios'
+        });
+      }
+
+      // Validar formato de email
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(email)) {
+        return res.status(400).json({
+          error: 'El formato del email no es válido'
+        });
+      }
+
+      // Validar horas
+      const parsedTotalHours = parseInt(totalHours);
+      if (isNaN(parsedTotalHours) || parsedTotalHours <= 0 || parsedTotalHours > 44) {
+        return res.status(400).json({
+          error: 'Las horas totales deben estar entre 1 y 44'
+        });
+      }
 
       // Verificar si el profesor existe
       const existingTeacher = await prisma.teacher.findUnique({
@@ -120,56 +144,76 @@ export const teacherController = {
         return res.status(404).json({ error: 'Profesor no encontrado' });
       }
 
-      // Verificar si el nuevo email ya está en uso por otro profesor
-      if (email !== existingTeacher.email) {
-        const emailExists = await prisma.teacher.findUnique({
-          where: { email }
-        });
+      // Verificar horas totales de asignaturas
+      if (subjects) {
+        let totalAssignedHours = 0;
+        for (const subject of subjects) {
+          const subjectData = await prisma.subject.findUnique({
+            where: { id: subject.subjectId }
+          });
+          if (!subjectData) {
+            return res.status(400).json({
+              error: `Asignatura con ID ${subject.subjectId} no encontrada`
+            });
+          }
+          totalAssignedHours += subjectData.hoursPerWeek;
+        }
 
-        if (emailExists) {
-          return res.status(400).json({ 
-            error: 'El email ya está en uso por otro profesor' 
+        if (totalAssignedHours > parsedTotalHours) {
+          return res.status(400).json({
+            error: `Las horas asignadas (${totalAssignedHours}) superan el máximo permitido (${parsedTotalHours})`
           });
         }
       }
 
       // Actualizar profesor
-      const updatedTeacher = await prisma.teacher.update({
-        where: { id: parseInt(id) },
-        data: {
-          firstName,
-          lastName,
-          email,
-          phone,
-          contractType,
-          totalHours: parseInt(totalHours),
-          ...(subjects && {
+      const updatedTeacher = await prisma.$transaction(async (prisma) => {
+        // Primero eliminar asignaciones existentes
+        await prisma.teacherSubject.deleteMany({
+          where: { teacherId: parseInt(id) }
+        });
+
+        // Luego actualizar el profesor
+        const teacher = await prisma.teacher.update({
+          where: { id: parseInt(id) },
+          data: {
+            firstName,
+            lastName,
+            email,
+            phone,
+            contractType,
+            totalHours: parsedTotalHours,
+            ...(subjects && {
+              subjects: {
+                create: subjects.map(subj => ({
+                  subject: { connect: { id: subj.subjectId } },
+                  course: { connect: { id: subj.courseId } }
+                }))
+              }
+            })
+          },
+          include: {
             subjects: {
-              deleteMany: {},
-              create: subjects.map(subj => ({
-                subject: { connect: { id: subj.subjectId } },
-                course: { connect: { id: subj.courseId } }
-              }))
-            }
-          })
-        },
-        include: {
-          subjects: {
-            include: {
-              subject: true,
-              course: true
+              include: {
+                subject: true,
+                course: true
+              }
             }
           }
-        }
+        });
+
+        return teacher;
       });
 
       res.json(updatedTeacher);
     } catch (error) {
       console.error('Error al actualizar profesor:', error);
-      res.status(500).json({ error: 'Error al actualizar el profesor' });
+      res.status(500).json({ 
+        error: 'Error al actualizar el profesor',
+        details: error.message 
+      });
     }
   },
-
   // Eliminar un profesor
   delete: async (req, res) => {
     try {
