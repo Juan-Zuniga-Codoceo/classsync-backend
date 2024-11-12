@@ -8,47 +8,35 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-model Admin {
-  id       Int      @id @default(autoincrement())
-  username String   @unique
-  password String
-  email    String   @unique
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-}
-
-model Teacher {
-  id           Int      @id @default(autoincrement())
-  firstName    String
-  lastName     String
-  phone        String?
-  email        String   @unique
-  contractType String
-  totalHours   Int
-  subjects     TeacherSubject[]
-  schedules    Schedule[]
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
-}
-
 model Subject {
-  id            Int      @id @default(autoincrement())
-  name          String
-  hoursPerWeek  Int
-  teachers      TeacherSubject[]
-  schedules     Schedule[]
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  id           Int             @id @default(autoincrement())
+  name         String         @unique
+  hoursPerWeek Int            @default(0)
+  teachers     TeacherSubject[]
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
 }
 
 model Course {
-  id            Int      @id @default(autoincrement())
-  name          String
-  level         String
-  teacherSubjects TeacherSubject[]
-  schedules      Schedule[]
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  id           Int             @id @default(autoincrement())
+  name         String
+  level        String         // Añadido campo level
+  teachers     TeacherSubject[]
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+}
+
+model Teacher {
+  id           Int             @id @default(autoincrement())
+  firstName    String
+  lastName     String
+  email        String         @unique
+  phone        String?
+  contractType String
+  totalHours   Int
+  subjects     TeacherSubject[]
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
 }
 
 model TeacherSubject {
@@ -63,32 +51,4 @@ model TeacherSubject {
   updatedAt DateTime @updatedAt
 
   @@unique([teacherId, subjectId, courseId])
-}
-
-model Schedule {
-  id          Int      @id @default(autoincrement())
-  teacher     Teacher  @relation(fields: [teacherId], references: [id])
-  teacherId   Int
-  subject     Subject  @relation(fields: [subjectId], references: [id])
-  subjectId   Int
-  course      Course   @relation(fields: [courseId], references: [id])
-  courseId    Int
-  dayOfWeek   Int
-  blockNumber Int
-  isActive    Boolean  @default(true)
-  history     ScheduleHistory[]
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-
-  @@unique([courseId, dayOfWeek, blockNumber])
-}
-
-model ScheduleHistory {
-  id              Int      @id @default(autoincrement())
-  schedule        Schedule @relation(fields: [scheduleId], references: [id])
-  scheduleId      Int
-  previousTeacherId Int
-  newTeacherId    Int
-  reason          String?
-  createdAt       DateTime @default(now())
 }

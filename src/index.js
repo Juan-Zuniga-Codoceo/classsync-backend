@@ -1,26 +1,45 @@
 // src/index.js
-require('dotenv').config();
-const express = require('express');
-const cors = require('cors');
-const authRoutes = require('./routes/auth');
-const teacherRoutes = require('./routes/teachers');
-const scheduleRoutes = require('./routes/schedules');
-const errorHandler = require('./middleware/errorHandler');
+import express from 'express';
+import cors from 'cors';
+import { PrismaClient } from '@prisma/client';
+import teacherRoutes from './routes/teacherRoutes.js';
+import subjectRoutes from './routes/subjectRoutes.js';
+import courseRoutes from './routes/courseRoutes.js';
 
+const prisma = new PrismaClient();
 const app = express();
 
+// Middleware
 app.use(cors());
 app.use(express.json());
 
-// Routes
-app.use('/api/auth', authRoutes);
+// Rutas
 app.use('/api/teachers', teacherRoutes);
-app.use('/api/schedules', scheduleRoutes);
+app.use('/api/subjects', subjectRoutes);
+app.use('/api/courses', courseRoutes);
 
-// Error handler
-app.use(errorHandler);
+// Ruta de prueba
+app.get('/api/test', (req, res) => {
+  res.json({ message: 'API funcionando correctamente' });
+});
+
+// Manejo de errores
+app.use((err, req, res, next) => {
+  console.error('Error:', err.stack);
+  res.status(500).json({
+    error: 'Algo salió mal!',
+    message: err.message
+  });
+});
 
 const PORT = process.env.PORT || 5000;
+
 app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+  console.log(`Servidor corriendo en puerto ${PORT}`);
+});
+
+// Manejo de cierre limpio
+process.on('SIGINT', async () => {
+  await prisma.$disconnect();
+  process.exit(0);
 });
