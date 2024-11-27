@@ -8,53 +8,122 @@ datasource db {
 }
 
 model Teacher {
-  id           Int             @id @default(autoincrement())
+  id           Int                 @id @default(autoincrement())
   firstName    String
   lastName     String
-  email        String          @unique
+  email        String              @unique
   phone        String?
   contractType String
   totalHours   Int
-  subjects     TeacherSubject[]
-  createdAt    DateTime        @default(now())
-  updatedAt    DateTime        @updatedAt
+  createdAt    DateTime            @default(now())
+  updatedAt    DateTime            @updatedAt
+  isActive     Boolean             @default(true)
+  schedules    Schedule[]
+  assignments  TeacherAssignment[]
 
+  @@index([lastName, firstName])
   @@map("teachers")
 }
 
 model Subject {
-  id           Int             @id @default(autoincrement())
-  name         String          @unique
-  hoursPerWeek Int            @default(0)
-  teachers     TeacherSubject[]
-  createdAt    DateTime        @default(now())
-  updatedAt    DateTime        @updatedAt
+  id             Int                 @id @default(autoincrement())
+  name           String              @unique
+  hoursPerWeek   Int                 @default(0)
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+  isActive       Boolean             @default(true)
+  courseSubjects CourseSubject[]
+  schedules      Schedule[]
+  assignments    TeacherAssignment[]
 
+  @@index([name])
   @@map("subjects")
 }
 
 model Course {
-  id           Int             @id @default(autoincrement())
-  name         String
-  level        String
-  teachers     TeacherSubject[]
-  createdAt    DateTime        @default(now())
-  updatedAt    DateTime        @updatedAt
+  id             Int                 @id @default(autoincrement())
+  name           String
+  level          String
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+  isActive       Boolean             @default(true)
+  courseSubjects CourseSubject[]
+  schedules      Schedule[]
+  assignments    TeacherAssignment[]
 
+  @@unique([name, level])
+  @@index([level])
   @@map("courses")
 }
 
-model TeacherSubject {
+model CourseSubject {
+  id           Int      @id @default(autoincrement())
+  subjectId    Int
+  courseId     Int
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  hoursPerWeek Int      @default(0)
+  isActive     Boolean  @default(true)
+  course       Course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  subject      Subject  @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+
+  @@unique([courseId, subjectId])
+  @@index([subjectId])
+  @@index([courseId])
+  @@map("course_subjects")
+}
+
+model TeacherAssignment {
+  id        Int       @id @default(autoincrement())
+  teacherId Int
+  subjectId Int
+  courseId  Int
+  isActive  Boolean   @default(true)
+  startDate DateTime  @default(now())
+  endDate   DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  course    Course    @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  subject   Subject   @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  teacher   Teacher   @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+
+  @@unique([teacherId, subjectId, courseId, isActive])
+  @@index([teacherId])
+  @@index([subjectId])
+  @@index([courseId])
+  @@map("teacher_assignments")
+}
+
+model Schedule {
   id          Int      @id @default(autoincrement())
-  teacher     Teacher  @relation(fields: [teacherId], references: [id], onDelete: Cascade)
   teacherId   Int
-  subject     Subject  @relation(fields: [subjectId], references: [id], onDelete: Cascade)
   subjectId   Int
-  course      Course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
   courseId    Int
+  dayOfWeek   Int
+  blockNumber Int
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+  isActive    Boolean  @default(true)
+  course      Course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  subject     Subject  @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  teacher     Teacher  @relation(fields: [teacherId], references: [id], onDelete: Cascade)
 
-  @@unique([teacherId, subjectId, courseId])
-  @@map("teacher_subjects")
+  @@unique([courseId, dayOfWeek, blockNumber])
+  @@unique([teacherId, dayOfWeek, blockNumber])
+  @@index([teacherId])
+  @@index([courseId])
+  @@map("schedules")
+}
+
+model ScheduleConfig {
+  id            Int      @id @default(autoincrement())
+  startTime     DateTime
+  endTime       DateTime
+  blockDuration Int
+  breakDuration Int
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  isActive      Boolean  @default(true)
+
+  @@map("schedule_config")
 }

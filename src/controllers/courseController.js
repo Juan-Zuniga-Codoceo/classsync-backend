@@ -1,58 +1,101 @@
+// src/controllers/courseController.js
 import prisma from '../config/db.js';
 
-export const courseController = {
+const courseController = {
   getAll: async (req, res) => {
     try {
+      console.log('Obteniendo cursos...');
       const courses = await prisma.course.findMany({
-        orderBy: {
-          name: 'asc'
-        }
+        where: {
+          isActive: true
+        },
+        include: {
+          courseSubjects: {
+            where: {
+              isActive: true
+            },
+            include: {
+              subject: {
+                select: {
+                  id: true,
+                  name: true
+                }
+              }
+            }
+          }
+        },
+        orderBy: [
+          { level: 'asc' },
+          { name: 'asc' }
+        ]
       });
+
       console.log('Cursos recuperados:', courses);
       res.json(courses);
     } catch (error) {
       console.error('Error al obtener cursos:', error);
-      res.status(500).json({ error: 'Error al obtener los cursos' });
+      res.status(500).json({
+        error: 'Error al obtener los cursos',
+        details: error.message
+      });
     }
   },
-
+  
   getById: async (req, res) => {
     try {
       const { id } = req.params;
       const course = await prisma.course.findUnique({
-        where: {
-          id: parseInt(id)
-        }
+        where: { id: parseInt(id) }
       });
 
       if (!course) {
-        return res.status(404).json({ error: 'Curso no encontrado' });
+        return res.status(404).json({ 
+          error: 'Curso no encontrado' 
+        });
       }
 
       res.json(course);
     } catch (error) {
-      console.error('Error al obtener curso por ID:', error);
-      res.status(500).json({ error: 'Error al obtener el curso' });
+      console.error('Error al obtener curso:', error);
+      res.status(500).json({
+        error: 'Error al obtener el curso',
+        details: error.message
+      });
     }
   },
 
   create: async (req, res) => {
     try {
+      console.log('Datos recibidos:', req.body);
       const { name, level } = req.body;
-      console.log('Datos recibidos para crear:', { name, level });
 
-      // Validaciones
-      if (!name || name.trim() === '') {
-        return res.status(400).json({ error: 'El nombre es requerido' });
+      // Validaciones básicas
+      if (!name?.trim()) {
+        return res.status(400).json({ 
+          error: 'El nombre es requerido' 
+        });
       }
 
-      // Validar nivel
-      const validLevels = ['primary', 'secondary'];
-      if (!validLevels.includes(level)) {
-        console.log('Nivel inválido recibido:', level);
+      if (!['primary', 'secondary'].includes(level)) {
+        return res.status(400).json({ 
+          error: 'El nivel debe ser "primary" o "secondary"' 
+        });
+      }
+
+      // Verificar si ya existe un curso con el mismo nombre en el mismo nivel
+      const existingCourse = await prisma.course.findFirst({
+        where: {
+          name: {
+            equals: name.trim(),
+            mode: 'insensitive'
+          },
+          level: level
+        }
+      });
+
+      if (existingCourse) {
         return res.status(400).json({
-          error: 'El nivel debe ser "primary" o "secondary"',
-          receivedLevel: level
+          error: 'Ya existe un curso con este nombre en el mismo nivel'
         });
       }
 
@@ -60,7 +103,7 @@ export const courseController = {
       const course = await prisma.course.create({
         data: {
           name: name.trim(),
-          level: level
+          level
         }
       });
 
@@ -68,9 +111,9 @@ export const courseController = {
       res.status(201).json(course);
     } catch (error) {
       console.error('Error al crear curso:', error);
-      res.status(500).json({ 
+      res.status(500).json({
         error: 'Error al crear el curso',
-        details: error.message 
+        details: error.message
       });
     }
   },
@@ -79,49 +122,54 @@ export const courseController = {
     try {
       const { id } = req.params;
       const { name, level } = req.body;
-      console.log('Datos recibidos para actualizar:', { id, name, level });
 
-      // Validaciones
-      if (!name || name.trim() === '') {
-        return res.status(400).json({ error: 'El nombre es requerido' });
-      }
-
-      // Validar nivel
-      const validLevels = ['primary', 'secondary'];
-      if (!validLevels.includes(level)) {
-        console.log('Nivel inválido recibido en actualización:', level);
-        return res.status(400).json({
-          error: 'El nivel debe ser "primary" o "secondary"',
-          receivedLevel: level
+      // Validaciones básicas
+      if (!name?.trim()) {
+        return res.status(400).json({ 
+          error: 'El nombre es requerido' 
         });
       }
 
-      // Verificar si el curso existe
-      const existingCourse = await prisma.course.findUnique({
-        where: { id: parseInt(id) }
-      });
-
-      if (!existingCourse) {
-        return res.status(404).json({ error: 'Curso no encontrado' });
+      if (!['primary', 'secondary'].includes(level)) {
+        return res.status(400).json({ 
+          error: 'El nivel debe ser "primary" o "secondary"' 
+        });
       }
 
-      const course = await prisma.course.update({
+      // Verificar si existe otro curso con el mismo nombre en el mismo nivel
+      const existingCourse = await prisma.course.findFirst({
         where: {
-          id: parseInt(id)
-        },
-        data: {
-          name: name.trim(),
-          level: level
+          name: {
+            equals: name.trim(),
+            mode: 'insensitive'
+          },
+          level: level,
+          id: {
+            not: parseInt(id)
+          }
         }
       });
 
-      console.log('Curso actualizado:', course);
+      if (existingCourse) {
+        return res.status(400).json({
+          error: 'Ya existe otro curso con este nombre en el mismo nivel'
+        });
+      }
+
+      const course = await prisma.course.update({
+        where: { id: parseInt(id) },
+        data: {
+          name: name.trim(),
+          level
+        }
+      });
+
       res.json(course);
     } catch (error) {
       console.error('Error al actualizar curso:', error);
-      res.status(500).json({ 
+      res.status(500).json({
         error: 'Error al actualizar el curso',
-        details: error.message 
+        details: error.message
       });
     }
   },
@@ -130,39 +178,66 @@ export const courseController = {
     try {
       const { id } = req.params;
 
-      // Verificar si existe el curso
-      const existingCourse = await prisma.course.findUnique({
+      // Verificar si el curso existe
+      const course = await prisma.course.findUnique({
         where: { id: parseInt(id) },
         include: {
           teachers: true
         }
       });
 
-      if (!existingCourse) {
-        return res.status(404).json({ error: 'Curso no encontrado' });
+      if (!course) {
+        return res.status(404).json({
+          error: 'Curso no encontrado'
+        });
       }
 
       // Verificar si tiene profesores asignados
-      if (existingCourse.teachers.length > 0) {
+      if (course.teachers.length > 0) {
         return res.status(400).json({
           error: 'No se puede eliminar el curso porque tiene profesores asignados'
         });
       }
 
-      // Eliminar el curso
       await prisma.course.delete({
         where: { id: parseInt(id) }
       });
 
-      res.json({
+      res.json({ 
         message: 'Curso eliminado correctamente',
         id: parseInt(id)
       });
     } catch (error) {
       console.error('Error al eliminar curso:', error);
-      res.status(500).json({ 
+      res.status(500).json({
         error: 'Error al eliminar el curso',
-        details: error.message 
+        details: error.message
+      });
+    }
+  },
+
+  // Obtener cursos por nivel
+  getByLevel: async (req, res) => {
+    try {
+      const { level } = req.params;
+      
+      if (!['primary', 'secondary'].includes(level)) {
+        return res.status(400).json({ 
+          error: 'Nivel inválido' 
+        });
+      }
+
+      const courses = await prisma.course.findMany({
+        where: { level },
+        orderBy: { name: 'asc' }
+      });
+
+      res.json(courses);
+    } catch (error) {
+      console.error('Error al obtener cursos por nivel:', error);
+      res.status(500).json({
+        error: 'Error al obtener los cursos',
+        details: error.message
       });
     }
   }

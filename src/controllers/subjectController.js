@@ -2,16 +2,68 @@
 import prisma from '../config/db.js';
 
 export const subjectController = {
-  // Obtener todas las asignaturas
   getAll: async (req, res) => {
     try {
       const subjects = await prisma.subject.findMany({
+        where: {
+          isActive: true
+        },
+        include: {
+          courseSubjects: {
+            where: {
+              isActive: true
+            },
+            include: {
+              course: {
+                select: {
+                  id: true,
+                  name: true,
+                  level: true
+                }
+              }
+            }
+          },
+          assignments: {
+            where: {
+              isActive: true
+            },
+            include: {
+              teacher: {
+                select: {
+                  id: true,
+                  firstName: true,
+                  lastName: true
+                }
+              },
+              course: {
+                select: {
+                  id: true,
+                  name: true
+                }
+              }
+            }
+          }
+        },
         orderBy: {
           name: 'asc'
         }
       });
 
-      res.json(subjects);
+      const formattedSubjects = subjects.map(subject => ({
+        id: subject.id,
+        name: subject.name,
+        courses: subject.courseSubjects.map(cs => ({
+          id: cs.course.id,
+          name: cs.course.name,
+          level: cs.course.level,
+          hoursPerWeek: cs.hoursPerWeek,
+          activeTeacher: subject.assignments.find(
+            a => a.courseId === cs.course.id
+          )?.teacher || null
+        }))
+      }));
+
+      res.json(formattedSubjects);
     } catch (error) {
       console.error('Error al obtener asignaturas:', error);
       res.status(500).json({
@@ -21,17 +73,28 @@ export const subjectController = {
     }
   },
 
-  // Obtener una asignatura por ID
   getById: async (req, res) => {
     try {
       const { id } = req.params;
 
       const subject = await prisma.subject.findUnique({
         where: { 
-          id: parseInt(id) 
+          id: parseInt(id),
+          isActive: true
         },
         include: {
-          teachers: {
+          courseSubjects: {
+            where: {
+              isActive: true
+            },
+            include: {
+              course: true
+            }
+          },
+          assignments: {
+            where: {
+              isActive: true
+            },
             include: {
               teacher: {
                 select: {
@@ -51,8 +114,22 @@ export const subjectController = {
           error: 'Asignatura no encontrada' 
         });
       }
+
+      const formattedSubject = {
+        id: subject.id,
+        name: subject.name,
+        courses: subject.courseSubjects.map(cs => ({
+          id: cs.course.id,
+          name: cs.course.name,
+          level: cs.course.level,
+          hoursPerWeek: cs.hoursPerWeek,
+          activeTeacher: subject.assignments.find(
+            a => a.courseId === cs.course.id
+          )?.teacher || null
+        }))
+      };
       
-      res.json(subject);
+      res.json(formattedSubject);
     } catch (error) {
       console.error('Error al obtener asignatura:', error);
       res.status(500).json({ 
@@ -62,31 +139,37 @@ export const subjectController = {
     }
   },
 
-  // Crear una nueva asignatura
   create: async (req, res) => {
     try {
-      const { name, hoursPerWeek } = req.body;
+      const { name, courses } = req.body;
       
-      // Validaciones
       if (!name || name.trim() === '') {
         return res.status(400).json({ 
           error: 'El nombre de la asignatura es requerido' 
         });
       }
 
-      if (hoursPerWeek !== undefined && (hoursPerWeek < 0 || hoursPerWeek > 40)) {
+      if (!Array.isArray(courses) || courses.length === 0) {
         return res.status(400).json({
-          error: 'Las horas por semana deben estar entre 0 y 40'
+          error: 'Debe asignar al menos un curso con sus horas correspondientes'
         });
       }
 
-      // Verificar si ya existe una asignatura con el mismo nombre
+      for (const course of courses) {
+        if (!course.hoursPerWeek || course.hoursPerWeek < 1 || course.hoursPerWeek > 40) {
+          return res.status(400).json({
+            error: `Las horas semanales para cada curso deben estar entre 1 y 40`
+          });
+        }
+      }
+
       const existingSubject = await prisma.subject.findFirst({
         where: {
           name: {
             equals: name.trim(),
             mode: 'insensitive'
-          }
+          },
+          isActive: true
         }
       });
 
@@ -96,14 +179,39 @@ export const subjectController = {
         });
       }
 
-      const subject = await prisma.subject.create({
-        data: {
-          name: name.trim(),
-          hoursPerWeek: parseInt(hoursPerWeek || 0)
-        }
+      const result = await prisma.$transaction(async (prisma) => {
+        const newSubject = await prisma.subject.create({
+          data: {
+            name: name.trim(),
+            isActive: true
+          }
+        });
+
+        await prisma.courseSubject.createMany({
+          data: courses.map(course => ({
+            subjectId: newSubject.id,
+            courseId: parseInt(course.id),
+            hoursPerWeek: parseInt(course.hoursPerWeek),
+            isActive: true
+          }))
+        });
+
+        return await prisma.subject.findUnique({
+          where: { id: newSubject.id },
+          include: {
+            courseSubjects: {
+              where: {
+                isActive: true
+              },
+              include: {
+                course: true
+              }
+            }
+          }
+        });
       });
-      
-      res.status(201).json(subject);
+
+      res.status(201).json(result);
     } catch (error) {
       console.error('Error al crear asignatura:', error);
       res.status(500).json({ 
@@ -113,28 +221,36 @@ export const subjectController = {
     }
   },
 
-  // Actualizar una asignatura
   update: async (req, res) => {
     try {
       const { id } = req.params;
-      const { name, hoursPerWeek } = req.body;
+      const { name, courses } = req.body;
       
-      // Validaciones
       if (!name || name.trim() === '') {
         return res.status(400).json({ 
           error: 'El nombre de la asignatura es requerido' 
         });
       }
 
-      if (hoursPerWeek !== undefined && (hoursPerWeek < 0 || hoursPerWeek > 40)) {
+      if (!Array.isArray(courses) || courses.length === 0) {
         return res.status(400).json({
-          error: 'Las horas por semana deben estar entre 0 y 40'
+          error: 'Debe asignar al menos un curso con sus horas correspondientes'
         });
       }
 
-      // Verificar si existe la asignatura
+      for (const course of courses) {
+        if (!course.hoursPerWeek || course.hoursPerWeek < 1 || course.hoursPerWeek > 40) {
+          return res.status(400).json({
+            error: `Las horas semanales para cada curso deben estar entre 1 y 40`
+          });
+        }
+      }
+
       const existingSubject = await prisma.subject.findUnique({
-        where: { id: parseInt(id) }
+        where: { 
+          id: parseInt(id),
+          isActive: true
+        }
       });
 
       if (!existingSubject) {
@@ -143,7 +259,6 @@ export const subjectController = {
         });
       }
 
-      // Verificar si el nuevo nombre ya existe en otra asignatura
       const duplicateName = await prisma.subject.findFirst({
         where: {
           name: {
@@ -152,7 +267,8 @@ export const subjectController = {
           },
           id: {
             not: parseInt(id)
-          }
+          },
+          isActive: true
         }
       });
 
@@ -162,17 +278,81 @@ export const subjectController = {
         });
       }
 
-      const subject = await prisma.subject.update({
-        where: { 
-          id: parseInt(id) 
-        },
-        data: {
-          name: name.trim(),
-          hoursPerWeek: parseInt(hoursPerWeek || 0)
+      const result = await prisma.$transaction(async (prisma) => {
+        const updatedSubject = await prisma.subject.update({
+          where: { id: parseInt(id) },
+          data: {
+            name: name.trim()
+          }
+        });
+
+        // Obtener relaciones existentes
+        const existingRelations = await prisma.courseSubject.findMany({
+          where: {
+            subjectId: parseInt(id),
+            isActive: true
+          }
+        });
+
+        const existingCourseIds = existingRelations.map(rel => rel.courseId);
+        const newCourseIds = courses.map(c => parseInt(c.id));
+
+        // Desactivar relaciones que ya no se usan
+        await prisma.courseSubject.updateMany({
+          where: {
+            subjectId: parseInt(id),
+            courseId: {
+              in: existingCourseIds.filter(id => !newCourseIds.includes(id))
+            },
+            isActive: true
+          },
+          data: {
+            isActive: false
+          }
+        });
+
+        // Actualizar relaciones existentes
+        for (const course of courses) {
+          if (existingCourseIds.includes(parseInt(course.id))) {
+            await prisma.courseSubject.updateMany({
+              where: {
+                subjectId: parseInt(id),
+                courseId: parseInt(course.id),
+                isActive: true
+              },
+              data: {
+                hoursPerWeek: parseInt(course.hoursPerWeek)
+              }
+            });
+          } else {
+            // Crear nueva relación
+            await prisma.courseSubject.create({
+              data: {
+                subjectId: parseInt(id),
+                courseId: parseInt(course.id),
+                hoursPerWeek: parseInt(course.hoursPerWeek),
+                isActive: true
+              }
+            });
+          }
         }
+
+        return await prisma.subject.findUnique({
+          where: { id: updatedSubject.id },
+          include: {
+            courseSubjects: {
+              where: {
+                isActive: true
+              },
+              include: {
+                course: true
+              }
+            }
+          }
+        });
       });
       
-      res.json(subject);
+      res.json(result);
     } catch (error) {
       console.error('Error al actualizar asignatura:', error);
       res.status(500).json({ 
@@ -182,37 +362,51 @@ export const subjectController = {
     }
   },
 
-  // Eliminar una asignatura
-  delete: async (req, res) => {
+  removeSubject: async (req, res) => {
     try {
       const { id } = req.params;
 
-      // Verificar si existe la asignatura
-      const existingSubject = await prisma.subject.findUnique({
-        where: { id: parseInt(id) },
-        include: {
-          teachers: true
+      const activeAssignments = await prisma.teacherAssignment.findMany({
+        where: {
+          subjectId: parseInt(id),
+          isActive: true
         }
       });
 
-      if (!existingSubject) {
-        return res.status(404).json({
-          error: 'Asignatura no encontrada'
-        });
-      }
-
-      // Verificar si la asignatura tiene profesores asignados
-      if (existingSubject.teachers.length > 0) {
+      if (activeAssignments.length > 0) {
         return res.status(400).json({
-          error: 'No se puede eliminar la asignatura porque tiene profesores asignados'
+          error: 'No se puede eliminar la asignatura porque tiene profesores asignados actualmente'
         });
       }
 
-      // Eliminar la asignatura
-      await prisma.subject.delete({
-        where: { 
-          id: parseInt(id) 
-        }
+      await prisma.$transaction(async (prisma) => {
+        await prisma.teacherAssignment.updateMany({
+          where: {
+            subjectId: parseInt(id),
+            isActive: true
+          },
+          data: {
+            isActive: false,
+            endDate: new Date()
+          }
+        });
+
+        await prisma.courseSubject.updateMany({
+          where: { 
+            subjectId: parseInt(id),
+            isActive: true
+          },
+          data: {
+            isActive: false
+          }
+        });
+
+        await prisma.subject.update({
+          where: { id: parseInt(id) },
+          data: {
+            isActive: false
+          }
+        });
       });
       
       res.json({
@@ -224,38 +418,6 @@ export const subjectController = {
       res.status(500).json({ 
         error: 'Error al eliminar la asignatura',
         details: error.message 
-      });
-    }
-  },
-
-  // Obtener asignaturas por profesor
-  getByTeacher: async (req, res) => {
-    try {
-      const { teacherId } = req.params;
-
-      const subjects = await prisma.subject.findMany({
-        where: {
-          teachers: {
-            some: {
-              teacherId: parseInt(teacherId)
-            }
-          }
-        },
-        include: {
-          teachers: {
-            include: {
-              course: true
-            }
-          }
-        }
-      });
-
-      res.json(subjects);
-    } catch (error) {
-      console.error('Error al obtener asignaturas del profesor:', error);
-      res.status(500).json({
-        error: 'Error al obtener las asignaturas del profesor',
-        details: error.message
       });
     }
   }
