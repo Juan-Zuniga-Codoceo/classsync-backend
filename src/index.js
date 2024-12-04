@@ -1,4 +1,3 @@
-// src/index.js
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
@@ -13,61 +12,97 @@ dotenv.config();
 
 const app = express();
 
-// Middleware
+// Configuración básica de CORS para desarrollo
 app.use(cors({
-  origin: ['http://localhost:5173', 'http://localhost:3000'],
+  origin: 'http://localhost:5173', // Vite default
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  credentials: true
 }));
 
-app.use(express.json());
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// Logging middleware
+// Request logging
 app.use((req, res, next) => {
-  console.log(`${req.method} ${req.url}`);
+  const start = Date.now();
+  res.on('finish', () => {
+    const duration = Date.now() - start;
+    console.log(
+      `[${new Date().toISOString()}] ${req.method} ${req.url} ${res.statusCode} ${duration}ms`
+    );
+  });
   next();
 });
 
-// Rutas
+// Health check
+app.get('/health', (req, res) => {
+  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
+// API Routes
 app.use('/api/schedules', scheduleRoutes);
 app.use('/api/teachers', teacherRoutes);
 app.use('/api/subjects', subjectRoutes);
 app.use('/api/courses', courseRoutes);
 app.use('/api/config', configRoutes);
 
+// 404 handler
+app.use((req, res) => {
+  res.status(404).json({ error: 'Ruta no encontrada' });
+});
+
 // Error handler
 app.use((err, req, res, next) => {
-  console.error(err.stack);
-  res.status(500).json({
+  console.error(`[ERROR] ${err.stack}`);
+  
+  if (err.name === 'PrismaClientKnownRequestError') {
+    return res.status(400).json({
+      error: 'Error de base de datos',
+      details: err.message
+    });
+  }
+
+  res.status(err.status || 500).json({
     error: 'Error interno del servidor',
-    details: process.env.NODE_ENV === 'development' ? err.message : undefined
+    details: err.message,
+    stack: err.stack
   });
 });
 
-// Verificar conexión a la base de datos
-prisma.$connect()
-  .then(() => {
-    console.log('Database connected successfully');
+// Database connection and server startup
+const startServer = async () => {
+  try {
+    await prisma.$connect();
+    console.log('✅ Base de datos conectada');
+
     const PORT = process.env.PORT || 5000;
     app.listen(PORT, () => {
-      console.log(`Server running on port ${PORT}`);
-      console.log(`Mode: ${process.env.NODE_ENV}`);
+      console.log(`🚀 Servidor corriendo en http://localhost:${PORT}`);
+      console.log(`🔧 Modo: ${process.env.NODE_ENV}`);
     });
-  })
-  .catch((error) => {
-    console.error('Database connection failed:', error);
+  } catch (error) {
+    console.error('❌ Error al iniciar el servidor:', error);
+    await prisma.$disconnect();
     process.exit(1);
-  });
+  }
+};
 
-// Handle termination
-process.on('SIGTERM', async () => {
-  console.log('SIGTERM received. Closing HTTP server...');
-  await prisma.$disconnect();
-  process.exit(0);
-});
+// Graceful shutdown
+const shutdown = async (signal) => {
+  console.log(`\n${signal} recibido. Iniciando apagado...`);
+  try {
+    await prisma.$disconnect();
+    console.log('Base de datos desconectada');
+    process.exit(0);
+  } catch (error) {
+    console.error('Error durante el apagado:', error);
+    process.exit(1);
+  }
+};
 
-process.on('SIGINT', async () => {
-  console.log('SIGINT received. Closing HTTP server...');
-  await prisma.$disconnect();
-  process.exit(0);
-});
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));
+
+// Start server
+startServer();
